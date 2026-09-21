@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrafficGuard Pro - Full JS Vision & ANPR</title>
+    <!-- TensorFlow.js & COCO-SSD -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <!-- Tesseract.js for Client-Side ANPR OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #050505;
+            color: #00ff66;
+            font-family: monospace;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+        sidebar {
+            width: 340px;
+            background: #0c0c0c;
+            border-right: 1px solid #222;
+            padding: 25px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+        }
+        main {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+            position: relative;
+            padding: 20px;
+        }
+        h2 { font-size: 16px; letter-spacing: 2px; color: #fff; }
+        .card {
+            background: #121212;
+            border: 1px solid #222;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .metric { font-size: 26px; color: #00ff66; font-weight: bold; }
+        .label { font-size: 11px; color: #777; text-transform: uppercase; letter-spacing: 1px; }
+        .video-container {
+            position: relative;
+            display: inline-block;
+        }
+        video, canvas {
+            display: block;
+            max-width: 100%;
+            border: 1px solid #222;
+            box-shadow: 0 0 40px rgba(0,0,0,0.9);
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .status-dot { height: 10px; width: 10px; background-color: #ffeb3b; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #ffeb3b; }
+    </style>
+</head>
+<body>
+
+    <sidebar>
+        <h2>TRAFFIC_GUARD <span class="status-dot" id="dot"></span></h2>
+        
+        <div class="card">
+            <span class="label">Detected Vehicles</span>
+            <span class="metric" id="vehicles">0</span>
+        </div>
+
+        <div class="card">
+            <span class="label">Detected Pedestrians</span>
+            <span class="metric" id="people">0</span>
+        </div>
+
+        <div class="card">
+            <span class="label">Latest ANPR Plate</span>
+            <span class="metric" id="plate" style="font-size: 18px; color: #ffeb3b;">SCANNING...</span>
+        </div>
+
+        <div class="card">
+            <span class="label">Engine Status</span>
+            <span class="metric" id="status" style="font-size: 13px; color: #ffeb3b;">INITIALIZING...</span>
+        </div>
+    </sidebar>
+
+    <main>
+        <div class="video-container">
+            <video id="webcam" autoplay playsinline width="640" height="480"></video>
+            <canvas id="canvas" width="640" height="480"></canvas>
+            <canvas id="cropCanvas" style="display:none;"></canvas>
+        </div>
+    </main>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const cropCanvas = document.getElementById('cropCanvas');
+        const cropCtx = cropCanvas.getContext('2d');
+
+        let model = null;
+        let ocrWorker = null;
+        let isProcessingOCR = false;
+        let lastPlate = "WAITING...";
+        
+async function setupCamera() {
+    try {
+        const constraints = {
+            video: {
+                facingMode: { exact: "environment" }, // Memaksa kamera belakang
+                width: { ideal: 640 },
+                height: { ideal: 480 }
+            },
+            audio: false
+        };
+        
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        return new Promise((resolve) => {
+            video.onloadedmetadata = () => { resolve(video); };
+        });
+    } catch (err) {
+        console.warn("Kamera belakang exact tidak ditemukan, mencoba kamera default...");
+        // Fallback ke kamera apa saja jika perangkat tidak mendukung exact environment
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        video.srcObject = fallbackStream;
+        return new Promise((resolve) => {
+            video.onloadedmetadata = () => { resolve(video); };
+        });
+    }
+}
+
+        async function initOCR() {
+            document.getElementById('status').innerText = "LOADING OCR...";
+            ocrWorker = await Tesseract.createWorker('eng');
+        }
+
+        async function runDetection() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const predictions = await model.detect(video);
+            
+            let vehicleCount = 0;
+            let personCount = 0;
+            let targetVehicle = null;
+
+            predictions.forEach(prediction => {
+                const [x, y, width, height] = prediction.bbox;
+                const label = prediction.class;
+
+                if (label === 'person') {
+                    personCount++;
+                    ctx.strokeStyle = '#00ff66';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, width, height);
+                    ctx.fillStyle = '#00ff66';
+                    ctx.font = '12px monospace';
+                    ctx.fillText(`Person (${Math.round(prediction.score * 100)}%)`, x, y > 12 ? y - 4 : 12);
+                } else if (['car', 'bus', 'truck', 'motorcycle'].includes(label)) {
+                    vehicleCount++;
+                    ctx.strokeStyle = '#00ffff';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, width, height);
+                    ctx.fillStyle = '#00ffff';
+                    ctx.font = '12px monospace';
+                    ctx.fillText(`${label.toUpperCase()} (${Math.round(prediction.score * 100)}%)`, x, y > 12 ? y - 4 : 12);
+
+                    // Track largest vehicle for ANPR sampling
+                    if (!targetVehicle && width > 100 && height > 60) {
+                        targetVehicle = { x, y, width, height };
+                    }
+                }
+            });
+
+            document.getElementById('vehicles').innerText = vehicleCount;
+            document.getElementById('people').innerText = personCount;
+            document.getElementById('plate').innerText = lastPlate;
+
+            // Trigger ANPR OCR on detected vehicle region if not busy
+            if (targetVehicle && !isProcessingOCR && ocrWorker) {
+                isProcessingOCR = true;
+                processANPR(targetVehicle);
+            }
+
+            requestAnimationFrame(runDetection);
+        }
+
+        async function processANPR(box) {
+            try {
+                cropCanvas.width = box.width;
+                cropCanvas.height = box.height;
+                cropCtx.drawImage(video, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
+                
+                const dataUrl = cropCanvas.toDataURL('image/png');
+                const { data: { text } } = await ocrWorker.recognize(dataUrl);
+                
+                const cleaned = text.replace(/[^A-Z0-9]/g, '').trim();
+                if (cleaned.length >= 4) {
+                    lastPlate = cleaned;
+                }
+            } catch (err) {
+                console.error("ANPR extraction error:", err);
+            } finally {
+                setTimeout(() => { isProcessingOCR = false; }, 2000); // Rate limit OCR cycles
+            }
+        }
+
+        async function boot() {
+            await initOCR();
+            document.getElementById('status').innerText = "LOADING VISION MODEL...";
+            model = await cocoSsd.load();
+            
+            await setupCamera();
+            video.play();
+
+            document.getElementById('status').innerText = "ACTIVE";
+            document.getElementById('dot').style.backgroundColor = "#00ff66";
+            document.getElementById('dot').style.boxShadow = "0 0 8px #00ff66";
+
+            runDetection();
+        }
+
+        boot();
+    </script>
+</body>
+</html>
