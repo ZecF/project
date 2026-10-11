@@ -3,12 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TrafficGuard Pro - Multi-Color & Grayscale Detection</title>
-    <!-- TensorFlow.js & COCO-SSD -->
+    <title>TrafficGuard Pro - Multi-Color & Grayscale</title>
+    
+    <!-- Load TensorFlow.js & COCO-SSD -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
-    <!-- Tesseract.js for Client-Side ANPR OCR -->
+    <!-- Load Tesseract.js buat OCR Pelat -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -101,12 +103,12 @@
         <button id="btnColor" class="action-btn">Scan RGB / Grayscale</button>
 
         <div class="card">
-            <span class="label">Live Detected Vehicles</span>
+            <span class="label">Detected Vehicles</span>
             <span class="metric" id="vehicles">0</span>
         </div>
 
         <div class="card">
-            <span class="label">Color Logs (Database Array)</span>
+            <span class="label">Color Array Log</span>
             <div id="colorLogs" class="log-container">Awaiting Scan...</div>
         </div>
 
@@ -125,6 +127,8 @@
         <div class="video-container">
             <video id="webcam" autoplay playsinline width="640" height="480"></video>
             <canvas id="canvas" width="640" height="480"></canvas>
+            
+            <!-- Canvas hidden buat proses data gambar di background -->
             <canvas id="cropCanvas" style="display:none;"></canvas>
             <canvas id="colorCanvas" style="display:none;"></canvas>
         </div>
@@ -145,9 +149,11 @@
         let lastPlate = "WAITING...";
         let detectColorEnabled = false;
 
+        // Handle tombol scan warna
         document.getElementById('btnColor').addEventListener('click', function() {
             detectColorEnabled = !detectColorEnabled;
             this.classList.toggle('active');
+            
             if (detectColorEnabled) {
                 this.innerText = "RGB SCAN: ACTIVE";
                 document.getElementById('colorLogs').innerText = "Scanning colors...\n";
@@ -157,9 +163,7 @@
             }
         });
 
-        // ==========================================
-        // DATABASE WARNA (Supaya deteksi tidak lari kemana-mana)
-        // ==========================================
+        // Pakem Database Warna (Biar hasil nggak lari kemana-mana)
         const colorDatabase = [
             { name: 'Hitam', r: 30, g: 30, b: 30, type: 'Grayscale' },
             { name: 'Putih', r: 220, g: 220, b: 220, type: 'Grayscale' },
@@ -171,15 +175,17 @@
             { name: 'Oranye', r: 255, g: 140, b: 0, type: 'RGB' }
         ];
 
-        // Cari warna terdekat dari database menggunakan Euclidean distance
+        // Fungsi cari warna terdekat pakai Euclidean distance
         function getClosestColor(r, g, b) {
+            // Cek apakah pixel ini warnanya monokrom (grayscale)
             let isMonochrome = Math.abs(r-g) < 25 && Math.abs(g-b) < 25 && Math.abs(r-b) < 25;
             let minDistance = Infinity;
             let closest = colorDatabase[0];
 
             for (let color of colorDatabase) {
                 let dist = Math.sqrt(Math.pow(r - color.r, 2) + Math.pow(g - color.g, 2) + Math.pow(b - color.b, 2));
-                // Bias ke grayscale jika nilai RGB saling berdekatan (untuk mendeteksi gambar B&W secara presisi)
+                
+                // Kalau gambar cenderung hitam-putih, kasih penalti ke warna RGB biar tetep detect grayscale
                 if (isMonochrome && color.type !== 'Grayscale') dist += 80; 
 
                 if (dist < minDistance) {
@@ -190,31 +196,34 @@
             return closest.name;
         }
 
-        // Analisis multi-warna dari area kendaraan
+        // Fungsi buat ngekstrak kombinasi warna dominan
         function extractTopColors(imageData) {
             let colorCounts = {};
             let data = imageData.data;
             let totalSampled = 0;
 
-            // Melompati beberapa piksel (step by 16) agar performa tetap cepat
+            // Lompat tiap 16 pixel biar performa FPS nggak drop
             for (let i = 0; i < data.length; i += 16) {
                 let r = data[i], g = data[i+1], b = data[i+2];
                 let colorName = getClosestColor(r, g, b);
+                
                 colorCounts[colorName] = (colorCounts[colorName] || 0) + 1;
                 totalSampled++;
             }
 
-            // Urutkan berdasarkan dominasi
+            // Urutin warna dari yang paling banyak muncul
             let sorted = Object.entries(colorCounts).sort((a, b) => b[1] - a[1]);
             
             let finalColors = [];
             for (let [name, count] of sorted) {
-                // Hanya masukkan warna jika mendominasi setidaknya 10% dari area kendaraan
+                // Syarat masuk array: warna harus mendominasi minimal 10% area
                 if ((count / totalSampled) > 0.10) {
                     finalColors.push(name);
                 }
-                if (finalColors.length >= 3) break; // Maksimal 3 warna (Misal: [Hitam, Putih, Kuning])
+                // Batasi maksimal 3 warna aja per kendaraan (cth: Hitam, Putih, Kuning)
+                if (finalColors.length >= 3) break;
             }
+            
             return finalColors.length > 0 ? finalColors : [sorted[0][0]];
         }
 
@@ -227,7 +236,7 @@
                 video.srcObject = stream;
                 return new Promise(resolve => { video.onloadedmetadata = () => resolve(video); });
             } catch (err) {
-                console.warn("Mencoba kamera alternatif...");
+                // Fallback kalau kamera belakang nggak jalan
                 const fallback = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
                 video.srcObject = fallback;
                 return new Promise(resolve => { video.onloadedmetadata = () => resolve(video); });
@@ -247,7 +256,7 @@
             let targetVehicle = null;
             let colorLogText = "";
 
-            predictions.forEach((prediction, index) => {
+            predictions.forEach((prediction) => {
                 const [x, y, width, height] = prediction.bbox;
                 const label = prediction.class;
 
@@ -255,15 +264,16 @@
                     vehicleCount++;
                     let vehicleId = vehicleCount;
 
-                    // Menggambar Bounding Box
+                    // Gambar kotak bounding box
                     ctx.strokeStyle = '#00ffff';
                     ctx.lineWidth = 2;
                     ctx.strokeRect(x, y, width, height);
 
-                    // --- SISTEM MULTI-COLOR RGB & GRAYSCALE ---
                     let displayColors = [];
+                    
+                    // Kalau fitur scan warna nyala
                     if (detectColorEnabled && width > 50 && height > 50) {
-                        // Ambil crop bagian tengah (membuang aspal jalanan di pinggir box)
+                        // Ambil area sedikit ke tengah biar nggak nge-detect aspal
                         const cx = x + (width * 0.15);
                         const cy = y + (height * 0.15);
                         const cw = width * 0.7;
@@ -277,37 +287,40 @@
                             const imgData = colorCtx.getImageData(0, 0, cw, ch);
                             displayColors = extractTopColors(imgData);
                             
-                            // Menambahkan ke panel log samping (Format: 1 [Hitam, Putih, Kuning])
+                            // Format buat masuk ke panel samping
                             colorLogText += `${vehicleId} [${displayColors.join(', ')}]\n`;
 
-                            // Cetak tag warna di kanvas
+                            // Tulis tag array warna di kanvas kamera
                             ctx.fillStyle = '#111';
                             ctx.fillRect(x, y - 20, 150, 18);
                             ctx.fillStyle = '#00ffff';
                             ctx.font = '12px monospace';
                             ctx.fillText(`ID:${vehicleId} [${displayColors.join(', ')}]`, x + 5, y - 6);
-
                         } catch (e) {}
                     } else {
+                        // Kalau fitur mati, cuma nampilin nama kendaraan
                         ctx.fillStyle = '#00ffff';
                         ctx.font = '12px monospace';
                         ctx.fillText(`${label.toUpperCase()} (${Math.round(prediction.score * 100)}%)`, x, y > 12 ? y - 4 : 12);
                     }
 
-                    // Menargetkan untuk ANPR (kendaraan paling besar)
+                    // Pilih kendaraan paling gede buat dibaca pelatnya (ANPR)
                     if (!targetVehicle && width > 100 && height > 60) {
                         targetVehicle = { x, y, width, height };
                     }
                 }
             });
 
+            // Update UI
             document.getElementById('vehicles').innerText = vehicleCount;
+            
             if (detectColorEnabled && vehicleCount > 0) {
                 document.getElementById('colorLogs').innerText = colorLogText;
             } else if (detectColorEnabled && vehicleCount === 0) {
                 document.getElementById('colorLogs').innerText = "No vehicles detected.";
             }
 
+            // Jalankan OCR kalau nggak lagi sibuk
             if (targetVehicle && !isProcessingOCR && ocrWorker) {
                 isProcessingOCR = true;
                 processANPR(targetVehicle);
@@ -330,14 +343,14 @@
                     lastPlate = cleaned;
                 }
             } catch (err) {} finally {
-                setTimeout(() => { isProcessingOCR = false; }, 2000); 
+                setTimeout(() => { isProcessingOCR = false; }, 2000); // Rate limit OCR biar nggak lag
             }
             document.getElementById('plate').innerText = lastPlate;
         }
 
         async function boot() {
             await initOCR();
-            document.getElementById('status').innerText = "LOADING VISION MODEL...";
+            document.getElementById('status').innerText = "LOADING MODEL...";
             model = await cocoSsd.load();
             
             await setupCamera();
