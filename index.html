@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TrafficGuard Pro - Full JS Vision & ANPR</title>
+    <title>TrafficGuard Pro - Full JS Vision, ANPR & Color RGB</title>
     <!-- TensorFlow.js & COCO-SSD -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
@@ -49,6 +49,22 @@
         }
         .metric { font-size: 26px; color: #00ff66; font-weight: bold; }
         .label { font-size: 11px; color: #777; text-transform: uppercase; letter-spacing: 1px; }
+        
+        /* Gaya untuk tombol RGB */
+        .action-btn {
+            background: #1a1a1a;
+            color: #00ffff;
+            border: 1px solid #00ffff;
+            padding: 12px;
+            cursor: pointer;
+            font-family: monospace;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: all 0.3s ease;
+        }
+        .action-btn:hover { background: #00ffff; color: #000; }
+        .action-btn.active { background: #00ffff; color: #000; box-shadow: 0 0 10px #00ffff; }
+
         .video-container {
             position: relative;
             display: inline-block;
@@ -72,6 +88,9 @@
     <sidebar>
         <h2>TRAFFIC_GUARD <span class="status-dot" id="dot"></span></h2>
         
+        <!-- Tombol untuk deteksi RGB Grayscale -->
+        <button id="btnColor" class="action-btn">Detect RGB/Grayscale</button>
+
         <div class="card">
             <span class="label">Detected Vehicles</span>
             <span class="metric" id="vehicles">0</span>
@@ -80,6 +99,11 @@
         <div class="card">
             <span class="label">Detected Pedestrians</span>
             <span class="metric" id="people">0</span>
+        </div>
+
+        <div class="card">
+            <span class="label">Vehicle Color (RGB)</span>
+            <span class="metric" id="vehicleColor" style="font-size: 16px; color: #00ffff;">OFF</span>
         </div>
 
         <div class="card">
@@ -97,7 +121,9 @@
         <div class="video-container">
             <video id="webcam" autoplay playsinline width="640" height="480"></video>
             <canvas id="canvas" width="640" height="480"></canvas>
+            <!-- Canvas tersembunyi untuk OCR & Warna -->
             <canvas id="cropCanvas" style="display:none;"></canvas>
+            <canvas id="colorCanvas" style="display:none;"></canvas>
         </div>
     </main>
 
@@ -107,38 +133,84 @@
         const ctx = canvas.getContext('2d');
         const cropCanvas = document.getElementById('cropCanvas');
         const cropCtx = cropCanvas.getContext('2d');
+        const colorCanvas = document.getElementById('colorCanvas');
+        const colorCtx = colorCanvas.getContext('2d');
 
         let model = null;
         let ocrWorker = null;
         let isProcessingOCR = false;
         let lastPlate = "WAITING...";
         
-async function setupCamera() {
-    try {
-        const constraints = {
-            video: {
-                facingMode: { exact: "environment" }, // Memaksa kamera belakang
-                width: { ideal: 640 },
-                height: { ideal: 480 }
-            },
-            audio: false
-        };
-        
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = stream;
-        return new Promise((resolve) => {
-            video.onloadedmetadata = () => { resolve(video); };
+        // State Sistem RGB
+        let detectColorEnabled = false;
+        let latestColor = "OFF";
+
+        // Toggle Event untuk Tombol RGB
+        document.getElementById('btnColor').addEventListener('click', function() {
+            detectColorEnabled = !detectColorEnabled;
+            this.classList.toggle('active');
+            if (detectColorEnabled) {
+                this.innerText = "RGB Scan: ACTIVE";
+                latestColor = "SCANNING...";
+            } else {
+                this.innerText = "Detect RGB/Grayscale";
+                latestColor = "OFF";
+            }
         });
-    } catch (err) {
-        console.warn("Kamera belakang exact tidak ditemukan, mencoba kamera default...");
-        // Fallback ke kamera apa saja jika perangkat tidak mendukung exact environment
-        const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        video.srcObject = fallbackStream;
-        return new Promise((resolve) => {
-            video.onloadedmetadata = () => { resolve(video); };
-        });
-    }
-}
+
+        // Logika untuk menentukan warna berdasarkan rata-rata RGB (Grayscale vs RGB)
+        function analyzeColor(r, g, b) {
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const diff = max - min;
+
+            // Logika Grayscale: Jika selisih R,G,B kecil, itu adalah warna monokrom
+            if (diff < 30) {
+                if (max < 50) return { name: 'Black', type: 'Grayscale' };
+                if (max > 200) return { name: 'White', type: 'Grayscale' };
+                return { name: 'Gray', type: 'Grayscale' };
+            }
+
+            // Logika Spektrum RGB
+            const colors = [
+                { name: 'Red', r: 255, g: 0, b: 0 },
+                { name: 'Green', r: 0, g: 255, b: 0 },
+                { name: 'Blue', r: 0, g: 0, b: 255 },
+                { name: 'Yellow', r: 255, g: 255, b: 0 },
+                { name: 'Cyan', r: 0, g: 255, b: 255 },
+                { name: 'Magenta', r: 255, g: 0, b: 255 },
+                { name: 'Orange', r: 255, g: 165, b: 0 }
+            ];
+
+            let minDistance = Infinity;
+            let closestColor = 'Unknown';
+
+            for (let c of colors) {
+                const dist = Math.sqrt(Math.pow(r - c.r, 2) + Math.pow(g - c.g, 2) + Math.pow(b - c.b, 2));
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    closestColor = c.name;
+                }
+            }
+            return { name: closestColor, type: 'RGB' };
+        }
+
+        async function setupCamera() {
+            try {
+                const constraints = {
+                    video: { facingMode: { exact: "environment" }, width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                };
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                return new Promise((resolve) => { video.onloadedmetadata = () => { resolve(video); }; });
+            } catch (err) {
+                console.warn("Kamera belakang exact tidak ditemukan, mencoba kamera default...");
+                const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                video.srcObject = fallbackStream;
+                return new Promise((resolve) => { video.onloadedmetadata = () => { resolve(video); }; });
+            }
+        }
 
         async function initOCR() {
             document.getElementById('status').innerText = "LOADING OCR...";
@@ -147,7 +219,6 @@ async function setupCamera() {
 
         async function runDetection() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
             const predictions = await model.detect(video);
             
             let vehicleCount = 0;
@@ -175,6 +246,51 @@ async function setupCamera() {
                     ctx.font = '12px monospace';
                     ctx.fillText(`${label.toUpperCase()} (${Math.round(prediction.score * 100)}%)`, x, y > 12 ? y - 4 : 12);
 
+                    // --- SISTEM DETEKSI WARNA RGB/GRAYSCALE ---
+                    if (detectColorEnabled && width > 50 && height > 50) {
+                        // Mengambil piksel bagian tengah kendaraan untuk akurasi warna
+                        const cx = x + width * 0.3;
+                        const cy = y + height * 0.3;
+                        const cw = width * 0.4;
+                        const ch = height * 0.4;
+
+                        colorCanvas.width = cw;
+                        colorCanvas.height = ch;
+                        colorCtx.drawImage(video, cx, cy, cw, ch, 0, 0, cw, ch);
+                        
+                        try {
+                            const imgData = colorCtx.getImageData(0, 0, cw, ch).data;
+                            let r = 0, g = 0, b = 0, count = 0;
+                            
+                            // Looping array pixel RGB
+                            for (let i = 0; i < imgData.length; i += 4) {
+                                r += imgData[i];
+                                g += imgData[i+1];
+                                b += imgData[i+2];
+                                count++;
+                            }
+                            
+                            r = Math.floor(r / count);
+                            g = Math.floor(g / count);
+                            b = Math.floor(b / count);
+
+                            const colorData = analyzeColor(r, g, b);
+                            latestColor = `${colorData.name} (${colorData.type})`;
+
+                            // Menggambar indikator warna di atas kotak kendaraan
+                            ctx.fillStyle = `rgb(${r},${g},${b})`;
+                            ctx.fillRect(x, y - 30, 15, 15); // Kotak palet warna
+                            ctx.strokeStyle = '#fff';
+                            ctx.strokeRect(x, y - 30, 15, 15);
+                            
+                            ctx.fillStyle = '#fff';
+                            ctx.fillText(`🎨 ${colorData.name}`, x + 20, y - 18);
+
+                        } catch (e) {
+                            // Abaikan error gambar kosong
+                        }
+                    }
+
                     // Track largest vehicle for ANPR sampling
                     if (!targetVehicle && width > 100 && height > 60) {
                         targetVehicle = { x, y, width, height };
@@ -185,6 +301,7 @@ async function setupCamera() {
             document.getElementById('vehicles').innerText = vehicleCount;
             document.getElementById('people').innerText = personCount;
             document.getElementById('plate').innerText = lastPlate;
+            document.getElementById('vehicleColor').innerText = latestColor;
 
             // Trigger ANPR OCR on detected vehicle region if not busy
             if (targetVehicle && !isProcessingOCR && ocrWorker) {
