@@ -1,56 +1,80 @@
-const express = require('express');
-const mongoose = require('mongoose');
-const path = require('path');
-const cors = require('cors');
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+const path = require("path");
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/db_deteksi_citra";
 
-// Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, "public")));
 
-app.use(express.static(path.join(__dirname, 'public')));
+// Koneksi ke MongoDB
+mongoose
+  .connect(MONGO_URI)
+  .then(() => console.log("✅ Terhubung ke MongoDB:", MONGO_URI))
+  .catch((err) => console.error("⚠️ Gagal terhubung ke MongoDB (Pastikan layanan MongoDB aktif):", err.message));
 
-
-const MONGO_URI = "mongodb+srv://dimasryanjr_db_user:dimasugesti@cluster0.yyngy7.mongodb.net/trafficguard?appName=Cluster0";
-
-mongoose.connect(MONGO_URI)
-    .then(() => console.log('✅ Berhasil terhubung ke MongoDB (TrafficGuard DB)'))
-    .catch(err => console.error('❌ Gagal connect ke MongoDB:', err));
-
-
-const trafficSchema = new mongoose.Schema({
-    vehicleId: Number,
-    colors: [String], // Array warna, cth: ['Hitam', 'Putih']
-    plateNumber: String,
-    timestamp: { type: Date, default: Date.now }
+// Schema & Model MongoDB untuk Log Deteksi Video
+const DetectionLogSchema = new mongoose.Schema({
+  namaVideo: { type: String, default: "Video Upload" },
+  resolusi: { type: String, required: true },
+  waktuTerdeteksi: {
+    type: String,
+    enum: ["Pagi", "Siang", "Sore", "Malam"],
+    required: true
+  },
+  jumlahKendaraan: { type: Number, required: true, default: 0 },
+  detailKendaraan: { type: String, default: "-" },
+  nomorPlat: { type: String, default: "Belum Terbaca" },
+  jumlahPenumpangKereta: { type: Number, required: true, default: 0 },
+  metrikCitra: {
+    meanLuminanceY: Number,
+    meanInPhaseI: Number,
+    meanSaturationS: Number,
+    meanValueV: Number,
+    thresholdBinary: Number
+  },
+  snapshotBase64: { type: String, default: "" },
+  createdAt: { type: Date, default: Date.now }
 });
 
-const TrafficLog = mongoose.model('TrafficLog', trafficSchema);
+const DetectionLog = mongoose.model("DetectionLog", DetectionLogSchema);
 
-
-app.post('/api/save-log', async (req, res) => {
-    try {
-        const { vehicleId, colors, plateNumber } = req.body;
-        
-        const newLog = new TrafficLog({
-            vehicleId: vehicleId,
-            colors: colors,
-            plateNumber: plateNumber
-        });
-
-        await newLog.save();
-        console.log(`📝 Data Disimpan: Pelat [${plateNumber}] - Warna [${colors}]`);
-        
-        res.status(201).json({ message: 'Success', data: newLog });
-    } catch (error) {
-        console.error('Error saving data:', error);
-        res.status(500).json({ error: 'Gagal menyimpan ke database' });
-    }
+// Endpoint: Ambil semua riwayat deteksi dari MongoDB
+app.get("/api/detections", async (req, res) => {
+  try {
+    const logs = await DetectionLog.find().sort({ createdAt: -1 }).limit(50);
+    res.json({ success: true, data: logs });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 });
 
-// Jalankan server
+// Endpoint: Simpan hasil deteksi frame video ke MongoDB
+app.post("/api/detections", async (req, res) => {
+  try {
+    const newLog = new DetectionLog(req.body);
+    const saved = await newLog.save();
+    res.status(201).json({ success: true, data: saved });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// Endpoint: Hapus log deteksi berdasarkan ID
+app.delete("/api/detections/:id", async (req, res) => {
+  try {
+    await DetectionLog.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: "Data berhasil dihapus" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 app.listen(PORT, () => {
-    console.log(`🚀 Server berjalan di http://localhost:${PORT}`);
+  console.log(`🚀 Server berjalan di http://localhost:${PORT}`);
 });
