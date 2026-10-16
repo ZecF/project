@@ -1,18 +1,14 @@
 {
-  "name": "api",
+  "name": "project-deteksi-citra-video",
   "version": "1.0.0",
-  "description": "",
+  "description": "Sistem Deteksi Kendaraan, Plat Nomor, Penumpang Kereta & Waktu (Pagi/Siang/Sore/Malam) berbasis Pengolahan Citra Digital & MongoDB",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "cors": "^2.8.6",
-    "express": "^5.3.0",
-    "mongoose": "^9.11.1"
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "mongoose": "^8.5.0"
   }
 }
