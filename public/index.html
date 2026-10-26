@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrafficGuard AI — Sistem Deteksi Kendaraan, Plat Nomor & Penumpang Kereta</title>
+  <link rel="stylesheet" href="/trafficguard.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- TensorFlow.js & COCO-SSD for client-side accelerated inference -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header class="header-bar">
+    <div class="logo-group">
+      <div class="logo-icon">🚦</div>
+      <div class="brand-text">
+        <h1>TRAFFICGUARD AI</h1>
+        <p>Sistem Deteksi Kendaraan, Plat Nomor (ALPR) & Penumpang Kereta</p>
+      </div>
+    </div>
+
+    <!-- Mode Selector Tabs -->
+    <nav class="tab-nav">
+      <button class="tab-btn active" id="tabVisionBtn" onclick="switchMainTab('vision')">
+        <span>👁️</span> Deteksi & Analisis
+      </button>
+      <button class="tab-btn" id="tabDbBtn" onclick="switchMainTab('db')">
+        <span>🗄️</span> MongoDB Explorer
+      </button>
+      <button class="tab-btn" id="tabStatsBtn" onclick="switchMainTab('stats')">
+        <span>📈</span> Statistik & Grafik
+      </button>
+    </nav>
+
+    <!-- DB Status Pill -->
+    <div class="header-status-group">
+      <div class="db-pill" id="mongoStatusPill" title="Status MongoDB Atlas">
+        <span class="status-dot" id="dbDot"></span>
+        <span id="dbStatusText">Menghubungkan ke MongoDB...</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="container">
+
+    <!-- Top Statistical Metric Cards -->
+    <section class="stat-grid">
+      <!-- Total Vehicles -->
+      <div class="stat-card" style="--card-color: var(--accent-cyan);">
+        <div class="stat-header">
+          <span class="stat-title">Total Kendaraan</span>
+          <span class="stat-icon">🚗</span>
+        </div>
+        <div class="stat-value" id="cardTotalVehicles">0</div>
+        <div class="stat-sub" id="cardVehiclesBreakdown">Mobil: 0 · Motor: 0 · Bus: 0 · Truk: 0</div>
+      </div>
+
+      <!-- Train Passenger Count -->
+      <div class="stat-card" style="--card-color: var(--accent-purple);">
+        <div class="stat-header">
+          <span class="stat-title">Penumpang Kereta</span>
+          <span class="stat-icon">🚆</span>
+        </div>
+        <div class="stat-value" id="cardPassengerCount">0 <span style="font-size: 0.9rem; font-weight: 500; color: var(--text-muted);">orang</span></div>
+        <div class="stat-sub" id="cardPassengerDensity">Okupansi Gerbong: Normal</div>
+      </div>
+
+      <!-- License Plate Detected -->
+      <div class="stat-card" style="--card-color: var(--accent-amber);">
+        <div class="stat-header">
+          <span class="stat-title">Nomor Plat (ALPR)</span>
+          <span class="stat-icon">🪪</span>
+        </div>
+        <div class="stat-value" id="cardRecentPlate" style="font-size: 1.5rem; letter-spacing: 0.05em;">-</div>
+        <div class="stat-sub" id="cardPlateAccuracy">Akurasi Pembacaan: 94.2%</div>
+      </div>
+
+      <!-- Time of Day & Lighting -->
+      <div class="stat-card" style="--card-color: var(--accent-orange);">
+        <div class="stat-header">
+          <span class="stat-title">Deteksi Pencahayaan</span>
+          <span class="stat-icon" id="cardTimeIcon">☀️</span>
+        </div>
+        <div class="stat-value">
+          <span class="time-badge siang" id="cardTimeBadge">Siang</span>
+        </div>
+        <div class="stat-sub" id="cardLightMetrics">Luminansi Y: 125 · HSV: 52% · Hangat YIQ: 0.004</div>
+      </div>
+    </section>
+
+    <!-- TAB 1: VISION WORKSPACE -->
+    <div id="tabVisionContent">
+      <div class="workspace-grid">
+        
+        <!-- Left: Interactive Video & Canvas Viewport -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h2><span>🎯</span> Visualizer & Deteksi Real-Time</h2>
+            <div class="presets-group">
+              <span style="font-size: 0.72rem; color: var(--text-dim);">Uji Coba Presets:</span>
+              <button class="preset-chip" onclick="loadSamplePreset('highway_day')">🛣️ Jalan Tol (Siang)</button>
+              <button class="preset-chip" onclick="loadSamplePreset('train_passengers')">🚆 Kereta Penumpang</button>
+              <button class="preset-chip" onclick="loadSamplePreset('sunset_traffic')">🌇 Sore / Senja</button>
+              <button class="preset-chip" onclick="loadSamplePreset('night_city')">🌃 Malam Hari</button>
+            </div>
+          </div>
+
+          <!-- Controls: Upload & Camera Toggle -->
+          <div class="input-controls">
+            <div class="upload-btn-wrap">
+              <button class="btn btn-primary">
+                <span>📁</span> Pilih Foto / Video
+              </button>
+              <input type="file" id="mediaFileInput" class="file-input" accept="image/*,video/*" onchange="handleFileSelect(event)">
+            </div>
+
+            <button class="btn btn-secondary" id="webcamToggleBtn" onclick="toggleWebcam()">
+              <span>📹</span> Buka Kamera Langsung
+            </button>
+
+            <button class="btn btn-success" id="syncToDbBtn" onclick="saveCurrentDetectionsToMongo()">
+              <span>💾</span> Simpan ke MongoDB Atlas
+            </button>
+
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.8rem; cursor: pointer; color: var(--text-muted);">
+              <input type="checkbox" id="autoSyncCheck" checked>
+              Auto-Sync ke Database
+            </label>
+          </div>
+
+          <!-- Main Viewport Canvas -->
+          <div class="viewport-wrap" id="viewportWrap">
+            <!-- Hidden Video element for decoding -->
+            <video id="videoElement" playsinline muted loop></video>
+
+            <!-- Render Canvas -->
+            <canvas id="detectionCanvas"></canvas>
+
+            <!-- Empty Dropzone State -->
+            <div class="dropzone-overlay" id="dropzoneOverlay" onclick="document.getElementById('mediaFileInput').click()">
+              <div class="drop-icon">📹</div>
+              <h3>Seret & Lepas Foto atau Video di Sini</h3>
+              <p>Mendukung format MP4, WEBM, MOV, JPG, PNG. Sistem akan menganalisis objek kendaraan, plat nomor, penumpang kereta, serta kondisi siang/sore/malam.</p>
+              <button class="btn btn-secondary" style="margin-top: 10px;">Jelajahi File</button>
+            </div>
+          </div>
+
+          <!-- Video Controls (visible when video is playing) -->
+          <div class="video-controls-bar" id="videoControlsBar" style="display: none;">
+            <button class="play-toggle-btn" id="playPauseBtn" onclick="togglePlayPause()">▶</button>
+            <input type="range" class="time-scrubber" id="timeScrubber" min="0" max="100" value="0" oninput="scrubVideo(this.value)">
+            <span class="video-time-text" id="videoTimeText">00:00 / 00:00</span>
+            <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="stepNextFrame()">Frame +1</button>
+          </div>
+        </div>
+
+        <!-- Right: Inspector Sidebar -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h2><span>🔍</span> Inspektur Deteksi</h2>
+            <span id="activeModelStatus" style="font-size: 0.72rem; color: #34d399;">Model Siap</span>
+          </div>
+
+          <!-- License Plate Inspector Box -->
+          <div class="inspector-card">
+            <h4><span>🪪</span> Plat Nomor Terisolasi (ALPR)</h4>
+            <div class="plate-preview-box">
+              <div class="plate-text-display" id="inspectPlateNumber">B 1842 RFO</div>
+              <div class="plate-meta-row">
+                <span id="inspectPlateRegion">Wilayah: DKI Jakarta</span>
+                <span id="inspectPlateConf">Keyakinan: 96.8%</span>
+              </div>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-dim); text-align: center;">
+              Pola Plat: Standar Indonesia (Seri Wilayah - Angka - Huruf)
+            </div>
+          </div>
+
+          <!-- Train Passenger Density Gauge -->
+          <div class="inspector-card">
+            <h4><span>🚆</span> Okupansi Penumpang Kereta</h4>
+            <div class="passenger-gauge">
+              <div class="gauge-header">
+                <span style="font-size: 0.8rem; color: var(--text-muted);">Jumlah di Gerbong:</span>
+                <span class="gauge-count" id="inspectPassengerCount">12 Orang</span>
+              </div>
+              <div class="gauge-bar-track">
+                <div class="gauge-bar-fill" id="inspectPassengerGaugeBar" style="width: 40%;"></div>
+              </div>
+              <div class="gauge-status-label">
+                <span>0 Sepi</span>
+                <span id="inspectPassengerStatus">Tingkat: Moderat (40%)</span>
+                <span>Penuh 30+</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Lighting / Time of Day Illumination Card -->
+          <div class="inspector-card">
+            <h4><span>☀️</span> Analisis Citra & Pencahayaan</h4>
+            <div class="metrics-mini-grid">
+              <div class="metric-pill">
+                <div class="metric-pill-label">Klasifikasi Waktu</div>
+                <div class="metric-pill-val" id="metricTimeClass" style="color: #fbbf24;">Siang</div>
+              </div>
+              <div class="metric-pill">
+                <div class="metric-pill-label">Luminansi Rata-rata (Y)</div>
+                <div class="metric-pill-val" id="metricGrayscale">122 / 255</div>
+              </div>
+              <div class="metric-pill">
+                <div class="metric-pill-label">HSV Value (Kecerahan)</div>
+                <div class="metric-pill-val" id="metricHsvV">51%</div>
+              </div>
+              <div class="metric-pill">
+                <div class="metric-pill-label">Indeks Kehangatan (YIQ)</div>
+                <div class="metric-pill-val" id="metricWarmth">+0.005</div>
+              </div>
+            </div>
+            <div style="margin-top: 8px; font-size: 0.72rem; color: var(--text-dim);" id="metricPreprocessMode">
+              Metode: Grayscale + Binary (M3)
+            </div>
+          </div>
+
+          <!-- Real-time Objects in Frame List -->
+          <div class="inspector-card" style="flex: 1; display: flex; flex-direction: column;">
+            <h4><span>📋</span> Objek Terdeteksi di Frame (<span id="detectedCountLabel">0</span>)</h4>
+            <div class="detection-list" id="detectedListItems">
+              <div style="text-align: center; color: var(--text-dim); font-size: 0.8rem; padding: 20px 0;">
+                Belum ada input citra atau video yang diproses.
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB 2: MONGODB ATLAS LOGS EXPLORER -->
+    <div id="tabDbContent" style="display: none;">
+      <div class="panel-card table-panel">
+        <div class="panel-header">
+          <h2><span>🗄️</span> Riwayat Deteksi MongoDB Atlas (`trafficguard.trafficlogs`)</h2>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="loadMongoLogs()">
+              <span>🔄</span> Refresh Data
+            </button>
+            <button class="btn btn-secondary" onclick="exportLogsJson()">
+              <span>📤</span> Export JSON
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="filter-bar">
+          <input type="text" id="filterSearchPlate" class="search-input" placeholder="Cari nomor plat (contoh: B 1842)..." oninput="debounceFilter()">
+          
+          <select id="filterVehicleType" class="select-input" onchange="loadMongoLogs()">
+            <option value="all">Semua Jenis Kendaraan</option>
+            <option value="Mobil">Mobil</option>
+            <option value="Motor">Motor</option>
+            <option value="Bus">Bus</option>
+            <option value="Truk">Truk</option>
+            <option value="Kereta">Kereta</option>
+          </select>
+
+          <select id="filterTimeOfDay" class="select-input" onchange="loadMongoLogs()">
+            <option value="all">Semua Waktu / Cahaya</option>
+            <option value="Siang">Siang</option>
+            <option value="Sore">Sore</option>
+            <option value="Malam">Malam</option>
+            <option value="Pagi">Pagi</option>
+          </select>
+
+          <span style="font-size: 0.8rem; color: var(--text-dim); margin-left: auto;" id="tableCountSummary">
+            Menampilkan 0 data
+          </span>
+        </div>
+
+        <div class="table-scroll-hint">
+          <span>↔ Geser tabel ke samping untuk melihat kolom lengkap</span>
+        </div>
+
+        <!-- Table View -->
+        <div class="custom-table-wrap">
+          <table class="custom-table">
+            <thead>
+              <tr>
+                <th>Waktu & Tanggal</th>
+                <th>Kondisi (Waktu)</th>
+                <th>Jenis Kendaraan</th>
+                <th>Nomor Plat</th>
+                <th>Penumpang Kereta</th>
+                <th>Warna Dominan</th>
+                <th>Metrik Citra (Y / HSV / Mode)</th>
+                <th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="mongoLogsTableBody">
+              <tr>
+                <td colspan="8" style="text-align: center; color: var(--text-dim); padding: 30px;">
+                  Memuat data dari MongoDB Atlas...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB 3: ANALYTICS & BREAKDOWN -->
+    <div id="tabStatsContent" style="display: none;">
+      <div class="stat-grid analytics-grid">
+        
+        <div class="panel-card">
+          <div class="panel-header">
+            <h2><span>📊</span> Distribusi Kendaraan & Kereta</h2>
+          </div>
+          <div id="vehicleBreakdownBars" style="display: flex; flex-direction: column; gap: 14px; padding: 10px 0;">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div class="panel-header">
+            <h2><span>🌇</span> Distribusi Kondisi Waktu (Pencahayaan)</h2>
+          </div>
+          <div id="timeBreakdownBars" style="display: flex; flex-direction: column; gap: 14px; padding: 10px 0;">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Main JavaScript Controller -->
+  <script src="/trafficguard.js"></script>
+</body>
+</html>
