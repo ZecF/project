@@ -1,6 +1,6 @@
 {
   "name": "trafficguard-ai",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "description": "TrafficGuard AI — Intelligent Transit & Traffic Vision System with MongoDB Atlas",
   "main": "server.js",
   "engines": {
@@ -8,39 +8,25 @@
   },
   "scripts": {
     "start": "node server.js",
-    "vall": "node server.js",
-    "music": "node server.js",
-    "trafficguard": "node server.js",
-    "test:traffic": "node test_trafficguard_api.js",
     "test": "node test_trafficguard_api.js"
   },
   "keywords": [
     "trafficguard",
     "computer-vision",
     "alpr",
-    "license-plate-recognition",
+    "vehicle-detection",
     "mongodb-atlas",
-    "passenger-counting"
+    "passenger-counting",
+    "time-of-day-classification"
   ],
   "author": "",
   "license": "MIT",
   "type": "commonjs",
   "dependencies": {
-    "@distube/ytdl-core": "^5.0.1",
-    "aki-api": "^7.0.1",
-    "axios": "^1.20.0",
-    "btch-downloader": "^6.4.0",
-    "cheerio": "^1.2.0",
-    "cors": "^2.8.6",
+    "cors": "^2.8.5",
     "express": "^5.3.0",
     "ffmpeg-static": "^5.3.0",
-    "fluent-ffmpeg": "^2.1.3",
-    "instagram-url-direct": "^2.0.7",
     "mongodb": "^7.7.0",
-    "multer": "^2.5.0",
-    "node-fetch": "^2.7.0",
-    "playwright-core": "^1.64.1",
-    "puppeteer-core": "^25.15.0",
-    "snapsave-media-downloader": "^2.5.1"
+    "multer": "^2.5.0"
   }
 }
