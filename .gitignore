@@ -1,0 +1,12 @@
+node_modules/
+.git/
+.gemini/
+uploads/frames/*
+uploads/traffic/*
+*.zip
+*.log
+.env
+release_stage/
+test_extract/
+make_release_zip.js
+package_project.js
