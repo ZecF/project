@@ -562,6 +562,7 @@ function generateHeuristicObjects(w, h) {
  */
 function drawBoundingBoxes(detections) {
   ctx.save();
+  const scale = Math.max(1, (canvas.width || 1280) / 900);
 
   detections.forEach(item => {
     const box = item.boundingBox;
@@ -571,12 +572,12 @@ function drawBoundingBoxes(detections) {
 
     // Box stroke
     ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = Math.max(2, Math.round(3 * scale));
     ctx.strokeRect(box.x, box.y, box.width, box.height);
 
     // Corner brackets styling (High-tech HUD look)
-    const cornerSize = Math.min(18, box.width / 4);
-    ctx.lineWidth = 4;
+    const cornerSize = Math.min(22 * scale, box.width / 4);
+    ctx.lineWidth = Math.max(3, Math.round(4 * scale));
     ctx.beginPath();
     // Top-left
     ctx.moveTo(box.x, box.y + cornerSize); ctx.lineTo(box.x, box.y); ctx.lineTo(box.x + cornerSize, box.y);
@@ -590,30 +591,34 @@ function drawBoundingBoxes(detections) {
 
     // Label Header
     const label = `${item.vehicleType} ${(item.confidence * 100).toFixed(0)}%`;
-    ctx.font = 'bold 12px Inter, sans-serif';
+    const labelFontSize = Math.round(12 * scale);
+    ctx.font = `bold ${labelFontSize}px Inter, sans-serif`;
     const textWidth = ctx.measureText(label).width;
+    const headerHeight = Math.round(22 * scale);
 
     ctx.fillStyle = color;
-    ctx.fillRect(box.x - 1, box.y - 22, textWidth + 14, 22);
+    ctx.fillRect(box.x - 1, box.y - headerHeight, textWidth + 14 * scale, headerHeight);
 
     ctx.fillStyle = '#0a0d14';
-    ctx.fillText(label, box.x + 6, box.y - 6);
+    ctx.fillText(label, box.x + 6 * scale, box.y - 6 * scale);
 
     // Plate Tag at bottom of box if vehicle
     if (item.plateNumber && item.plateNumber !== 'N/A') {
       const plateText = `🪪 ${item.plateNumber}`;
-      ctx.font = 'bold 11px monospace';
+      const plateFontSize = Math.round(11 * scale);
+      ctx.font = `bold ${plateFontSize}px monospace`;
       const plateWidth = ctx.measureText(plateText).width;
+      const plateHeight = Math.round(20 * scale);
 
       ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-      ctx.fillRect(box.x + (box.width - plateWidth - 12) / 2, box.y + box.height - 20, plateWidth + 12, 20);
+      ctx.fillRect(box.x + (box.width - plateWidth - 12 * scale) / 2, box.y + box.height - plateHeight, plateWidth + 12 * scale, plateHeight);
 
       ctx.strokeStyle = '#fbbf24';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(box.x + (box.width - plateWidth - 12) / 2, box.y + box.height - 20, plateWidth + 12, 20);
+      ctx.lineWidth = Math.max(1, Math.round(scale));
+      ctx.strokeRect(box.x + (box.width - plateWidth - 12 * scale) / 2, box.y + box.height - plateHeight, plateWidth + 12 * scale, plateHeight);
 
       ctx.fillStyle = '#fbbf24';
-      ctx.fillText(plateText, box.x + (box.width - plateWidth) / 2, box.y + box.height - 6);
+      ctx.fillText(plateText, box.x + (box.width - plateWidth) / 2, box.y + box.height - 6 * scale);
     }
   });
 
