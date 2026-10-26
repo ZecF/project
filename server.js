@@ -8,6 +8,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const trafficGuardBackend = require('./trafficGuardBackend');
+const vallBackend = require('./vallBackend');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,8 +22,14 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Mount TrafficGuard Router
+// Mount TrafficGuard Router & Vall Music Router
 app.use('/api/traffic', trafficGuardBackend);
+app.use('/api/music', vallBackend);
+
+// Vall Music Web App Route
+app.get(['/vall', '/vallmusic', '/music'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'vall-music.html'));
+});
 
 // Web App Route
 app.get(['/', '/traffic', '/trafficguard'], (req, res) => {

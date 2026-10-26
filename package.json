@@ -8,6 +8,8 @@
   },
   "scripts": {
     "start": "node server.js",
+    "vall": "node server.js",
+    "music": "node server.js",
     "trafficguard": "node server.js",
     "test:traffic": "node test_trafficguard_api.js",
     "test": "node test_trafficguard_api.js"
